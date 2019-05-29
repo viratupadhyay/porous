@@ -1,0 +1,120 @@
+#include <math.h>
+#include <stdlib.h>
+#include <stdio.h>
+#include "proto.h"
+#include "parms.h"
+#include "mpi.h"
+
+extern struct parms fluxV(double *data, int *sp, struct parms parms)
+{
+    int i, j, k, d, n, nc, np, nm;
+    double Kp, Km, *vx, *vy, *vz;
+    double *tphi = padding(data, sp, 0, parms);
+    double *tp = padding(data, sp, 1, parms);
+    vx = (double *) calloc(parms.N, sizeof(double));
+    vy = (double *) calloc(parms.N, sizeof(double));
+    vz = (double *) calloc(parms.N, sizeof(double));
+
+/*  Interior nodes 1 <= x < Nx-1 */
+    for(i = 0; i < parms.nx; i++){
+        for(j = 0; j < parms.ny; j++){
+            for(k = 0; k < parms.Nz; k++){
+                for(d = 0; d < Dim; d++){
+                    n = (((i+1)*(parms.ny+2)+j+1)*parms.Nz)+k;
+                    nc = sp[n];                                          // Center
+                    switch (d){
+                        case 0: 
+                            nm = sp[(n-((parms.ny+2)*parms.Nz))];        // Right/Left
+                            np = sp[(n+((parms.ny+2)*parms.Nz))];
+                            Km = 0.5*(K(tphi[nm])+K(tphi[nc]));
+                            Kp = 0.5*(K(tphi[np])+K(tphi[nc]));
+                            vx[((i*parms.ny+j)*parms.Nz)+k] = 0.5*((Km*(tp[nc] - tp[nm]))+(Kp*(tp[np] - tp[nc])));
+                            break;
+                        case 1:
+                            nm = sp[(n-parms.Nz)];                        // Up/Down
+                            np = sp[(n+parms.Nz)];
+                            Km = 0.5*(K(tphi[nm])+K(tphi[nc]));
+                            Kp = 0.5*(K(tphi[np])+K(tphi[nc]));
+                            vy[((i*parms.ny+j)*parms.Nz)+k] = 0.5*((Km*(tp[nc] - tp[nm]))+(Kp*(tp[np] - tp[nc])));
+                            break;
+                        case 2:
+                            nm = sp[(n-1)];
+                            np = sp[(n+1)];
+                            Km = 0.5*(K(tphi[nm])+K(tphi[nc]));
+                            Kp = 0.5*(K(tphi[np])+K(tphi[nc]));
+                            vz[((i*parms.ny+j)*parms.Nz)+k] = 0.5*((Km*(tp[nc] - tp[nm]))+(Kp*(tp[np] - tp[nc])));
+                            break;
+                    }
+//                    if (parms.x0+i == 0 || parms.x0+i == parms.Nx-1) continue;
+                }
+            }
+        }
+    }
+    
+
+/*  Boundary nodes x = 1, x = Nx-1 */
+    if (parms.x0 == 0){
+        for(j = 0; j < parms.ny; j++){
+            for(k = 0; k < parms.Nz; k++){
+                n = ((1*(parms.ny+2)+j+1)*parms.Nz)+k;
+                nc = sp[n];
+                np = sp[(n+((parms.ny+2)*parms.Nz))];
+                Kp = 0.5*(K(tphi[np])+K(tphi[nc]));
+                vx[((0*parms.ny+j)*parms.Nz)+k] = Kp*(tp[np] - tp[nc]);
+                vy[((0*parms.ny+j)*parms.Nz)+k] = 0;
+                vz[((0*parms.ny+j)*parms.Nz)+k] = 0;
+            }
+        }
+    }
+    if (parms.x1 == parms.Nx-1){
+        for(j = 0; j < parms.ny; j++){
+            for(k = 0; k < parms.Nz; k++){
+                n = (((parms.Nx-1)*(parms.ny+2)+j+1)*parms.Nz)+k;
+                nc = sp[n];
+                nm = sp[(n-((parms.ny+2)*parms.Nz))];
+                Km = 0.5*(K(tphi[nm])+K(tphi[nc]));
+                vx[(((parms.Nx-1)*parms.ny+j)*parms.Nz)+k] = Km*(tp[nc] - tp[nm]);
+                vy[(((parms.Nx-1)*parms.ny+j)*parms.Nz)+k] = 0;
+                vz[(((parms.Nx-1)*parms.ny+j)*parms.Nz)+k] = 0;
+            }
+        }
+    }
+
+#ifdef QCON
+    double localsum, globalsum;
+    writedata(vx, data, 2, 0, parms);
+    localsum = sumf(data, 2, parms);
+    MPI_Allreduce(&localsum, &globalsum, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
+    parms.avgV = globalsum/(parms.Nx*parms.Ny*parms.Nz);
+#endif    
+    writedata(vx, data, 2, 0, parms);
+    writedata(vy, data, 3, 0, parms);
+#if Dim == 3
+    writedata(vy, data, 4, 0, parms);
+#endif
+    free(vx); free(vy);
+    free(tphi); free(tp);
+    return parms;
+}
+
+void fluxC(double *data, double *r, double *dr, struct parms parms)
+{
+    int i, j, k, n;
+    double kr = 1.0;        // Rate constant = 1
+    double DSh = SH/parms.Pe;
+    for(i = 0; i < parms.nx; i++){
+        for(j = 0; j < parms.ny; j++){
+            for(k = 0; k < parms.Nz; k++){
+                n = ((i*parms.ny+j)*parms.Nz)+k;
+#ifdef TLIM
+                r[n] = DSh*S(data[n*parms.Nvar])*data[n*parms.Nvar+4]/data[n*parms.Nvar];
+                dr[n] = DSh*S(data[n*parms.Nvar])/data[n*parms.Nvar];
+#endif
+#ifdef RLIM
+                r[n] = parms.Da*kr*S(data[n*parms.Nvar])*data[n*parms.Nvar+4];
+                dr[n] = parms.Da*kr*S(data[n*parms.Nvar]);
+#endif
+            }
+        }
+    }
+}
