@@ -1,0 +1,20 @@
+#!/bin/csh
+# Make mpeg files
+
+set dir  = $1
+set name = $2
+set fr = 5
+
+set work = `cat .workdir`
+set wdir  = /home/checs/viratu/code/porous/${dir}
+
+mkdir $wdir/tmp
+set n = 0
+foreach file ($wdir/imgs/$name*.*)
+	echo $file
+	cp -p $file $wdir/tmp/m_$n.png
+	@ n = $n + 1
+end
+
+ffmpeg -r $fr -sameq -i ${wdir}/tmp/m_%d.png $wdir/${name}.avi
+rm -r $wdir/tmp

@@ -1,0 +1,45 @@
+#!/bin/csh
+# Create initial height maps - read info from fracs.dat
+
+set n  = $1
+set fn = $2
+set NX = $3					# Dimensions
+set NY = $4
+set Nz = $5
+set size = $6
+
+if (`hostname -s` =~ f*) then
+    set node = f
+endif
+
+if (`hostname -s` =~ e*) then
+    set node = e
+endif
+
+set version = `cat .version`$node
+
+test -e ${n}/init
+if ($status == 0)  then
+   echo "$n already exists - exit"
+   exit (1)
+endif
+
+@ size = $size + 1
+@ fn = $fn + 1					# Get info from fracs.dat
+set line = `head -$fn conf/fracs.dat | tail -1`
+set lambda = $line[2]
+set rgh    = $line[3]
+set seed   = $line[4]
+
+mkdir ${n}
+mkdir ${n}/init ${n}/data
+setenv GSL_RNG_SEED $seed			# Seed the RNG
+if ($node == e)  then
+    mpirun -np $size -hostfile hfile.txt porous-$version/bin/lognorm $NX $NY $Nz $lambda $rgh
+endif
+if ($node == f)  then
+    mpirun_rsh -np $size -hostfile hfile.txt porous-$version/bin/lognorm $NX $NY $Nz $lambda $rgh
+endif
+mv phi.dat.* ${n}/init
+cp -p conf/input.dat ${n}/init/input.dat # Input file
+echo `head -$fn conf/fracs.dat | tail -1` >> ${n}/Note

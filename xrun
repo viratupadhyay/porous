@@ -1,0 +1,40 @@
+#!/bin/csh
+# Run dissolution simulation
+
+set n = $1				# Run number
+set cyc = $2			# 0 start > 0 restart
+set size = $3
+
+if (`hostname -s` =~ f*) then
+    set node = f
+endif
+
+if (`hostname -s` =~ e*) then
+    set node = e
+endif
+
+set version = `cat .version`$node
+set work    = `cat .workdir`
+set workdir = ${work}/${n}
+test -e .threads
+if ($status == 0)  then
+	set threads = `cat .threads`
+	setenv GOTO_NUM_THREADS $threads
+endif
+
+set workdir = ${work}/${n}
+test -e $workdir
+if ($status == 1)  then
+   echo "$workdir missing - exit"
+   exit (1)
+endif
+
+cp hfile.txt ${n}/init/
+cp hfile.txt ${work}/${n}/init/
+cp porous-${version}/src/parms.h ${n}/parms.sim
+if ($node == e)  then
+   mpirun -np $size -hostfile hfile.txt porous-${version}/bin/porous $cyc $workdir >>& $workdir/LOG
+endif
+if ($node == f)  then
+   mpirun_rsh -np $size -hostfile hfile.txt porous-${version}/bin/porous $cyc $workdir >>& $workdir/LOG
+endif

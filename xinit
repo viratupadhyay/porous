@@ -1,0 +1,17 @@
+#!/bin/csh
+# Initialize new run on current node
+
+set n = $1				# Run number
+
+set work    = `cat .workdir`
+set workdir = ${work}/${n}
+
+test -e $workdir
+if ($status == 0)  then			# Restart job
+	echo "$workdir exists - restart"
+	cp -p ${n}/init/input.dat $workdir/init/input.dat	# Update input.dat
+else
+	mkdir $workdir			# New job
+	cp -rp ${n}/init $workdir/init	# Copy input files
+	mkdir $workdir/data
+endif
