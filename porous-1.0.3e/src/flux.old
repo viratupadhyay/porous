@@ -1,0 +1,122 @@
+#include <math.h>
+#include <stdlib.h>
+#include <stdio.h>
+#include "proto.h"
+#include "parms.h"
+#include "mpi.h"
+
+extern struct parms fluxV(double *data, int *sp, struct parms parms)
+{
+    int i, j, k, n, nc, npx, npy, nmx, nmy;
+    double Kx, Ky;
+    double *vx = (double *) calloc(parms.N, sizeof(double));
+    double *vy = (double *) calloc(parms.N, sizeof(double));
+    double *tphi = padding(data, sp, 0, parms);
+    double *tp = padding(data, sp, 1, parms);
+
+    for(i = 0; i < parms.nx; i++){
+        for(j = 0; j < parms.ny; j++){
+            for(k = 0; k < parms.Nz; k++){
+                n = (((i+1)*(parms.ny+2)+j+1)*parms.Nz)+k;
+                nc = sp[n];                                    // Center
+                npx = sp[(n+((parms.ny+2)*parms.Nz))];        // Right
+                npy = sp[(n+parms.Nz)];                        // Up
+                if (parms.x0+i == parms.Nx-1){
+                    vx[((i*parms.ny+j)*parms.Nz)+k] = vx[(((i-1)*parms.ny+j)*parms.Nz)+k];
+                }
+                else{
+                    Kx = 0.5*(K(tphi[npx])+K(tphi[nc]));
+                    vx[((i*parms.ny+j)*parms.Nz)+k] = Kx*(tp[npx] - tp[nc]);
+                    Ky = 0.5*(K(tphi[npy])+K(tphi[nc]));
+                    vy[((i*parms.ny+j)*parms.Nz)+k] = Ky*(tp[npy] - tp[nc]);
+                }
+            }
+        }
+    }
+
+    writedata(vx, data, 2, 0, parms);
+    writedata(vy, data, 3, 0, parms);
+    double *tvx = padding(data, sp, 2, parms);
+    double *tvy = padding(data, sp, 3, parms);
+    
+    for(i = 0; i < parms.nx; i++){
+        for(j = 0; j < parms.ny; j++){
+            for(k = 0; k < parms.Nz; k++){
+                if (parms.x0+i == parms.Nx-1){
+                    vx[((i*parms.ny+j)*parms.Nz)+k] = vx[((i*parms.ny+j)*parms.Nz)+k];
+                    vy[((i*parms.ny+j)*parms.Nz)+k] = vy[((i*parms.ny+j)*parms.Nz)+k];
+                }
+                else{
+                    n = (((i+1)*(parms.ny+2)+j+1)*parms.Nz)+k;
+                    nc = sp[n];
+                    nmx = sp[(n-((parms.ny+2)*parms.Nz))];
+                    nmy = sp[(n-parms.Nz)];
+                    vx[((i*parms.ny+j)*parms.Nz)+k] = 0.5*(tvx[nc] + tvx[nmx]);
+                    vy[((i*parms.ny+j)*parms.Nz)+k] = 0.5*(tvy[nc] + tvy[nmy]);
+                }
+            }
+        }
+    }
+
+#ifdef QCON
+    double localsum, globalsum;
+    writedata(vx, data, 2, 0, parms);
+    localsum = sumf(data, 2, parms);
+    MPI_Allreduce(&localsum, &globalsum, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
+    parms.avgV = globalsum/(parms.Nx*parms.Ny*parms.Nz);
+#endif    
+    writedata(vx, data, 2, 0, parms);
+    writedata(vy, data, 3, 0, parms);
+    //writedata(vz, data, 4, 0, parms);
+    free(tphi); free(tp); free(vx); free(vy); free(tvx); free(tvy);
+    return parms;
+}
+
+
+void fluxC(double *data, double *r, double *dr, struct parms parms)
+{
+    int i, j, k, n;
+    double kr = 1.0;        // Rate constant = 1
+    double DSh = SH/parms.Pe;
+    for(i = 0; i < parms.nx; i++){
+        for(j = 0; j < parms.ny; j++){
+            for(k = 0; k < parms.Nz; k++){
+                n = ((i*parms.ny+j)*parms.Nz)+k;
+#ifdef TLIM
+                r[n] = DSh*S(data[n*parms.Nvar])*data[n*parms.Nvar+4]/data[n*parms.Nvar];
+                dr[n] = DSh*S(data[n*parms.Nvar])/data[n*parms.Nvar];
+#endif
+#ifdef RLIM
+                r[n] = parms.Da*kr*S(data[n*parms.Nvar])*data[n*parms.Nvar+4];
+                dr[n] = parms.Da*kr*S(data[n*parms.Nvar]);
+#endif
+            }
+        }
+    }
+}
+/*
+#ifdef TLIM
+    double DSh = SH/parms.Pe;
+    for(i = 0; i < parms.nx; i++){
+        for(j = 0; j < parms.ny; j++){
+            for(k = 0; k < parms.Nz; k++){
+                n = ((i*parms.ny+j)*parms.Nz)+k;
+                r[n] = DSh*S(data[n*parms.Nvar])*data[n*parms.Nvar+4]/data[n*parms.Nvar];
+                dr[n] = DSh*S(data[n*parms.Nvar])/data[n*parms.Nvar];
+            }
+        }
+    }
+#endif
+#ifdef RLIM
+    double kr = 1.0;
+    for(i = 0; i < parms.nx; i++){
+        for(j = 0; j < parms.ny; j++){
+            for(k = 0; k < parms.Nz; k++){
+                r[n] = parms.Da*kr*S(data[n*parms.Nvar])*data[n*parms.Nvar+4];
+                dr[n] = parms.Da*kr*S(data[n*parms.Nvar]);
+            }
+        }
+    }
+#endif
+*/
+
